@@ -1,4 +1,4 @@
-// Copyright 2023, Collabora, Ltd.
+// Copyright 2023-2024, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -11,6 +11,7 @@
 #include "xrt/xrt_config_os.h"
 #include "tracking/t_vit_loader.h"
 #include "util/u_logging.h"
+#include "vit/vit_interface.h"
 
 #include <stdlib.h>
 
@@ -18,7 +19,7 @@
 #include <dlfcn.h>
 #endif
 
-static inline void
+static inline bool
 vit_get_proc(void *handle, const char *name, void *proc_ptr)
 {
 #if defined(XRT_OS_LINUX) || defined(XRT_OS_ANDROID)
@@ -26,10 +27,11 @@ vit_get_proc(void *handle, const char *name, void *proc_ptr)
 	char *err = dlerror();
 	if (err != NULL) {
 		U_LOG_E("Failed to load symbol %s", err);
-		return;
+		return false;
 	}
 
 	*(void **)proc_ptr = proc;
+	return true;
 #else
 #error "Unknown platform"
 #endif
@@ -50,7 +52,10 @@ t_vit_bundle_load(struct t_vit_bundle *vit, const char *path)
 
 #define GET_PROC(SYM)                                                                                                  \
 	do {                                                                                                           \
-		vit_get_proc(vit->handle, "vit_" #SYM, &vit->SYM);                                                     \
+		bool GET_PROC_success = vit_get_proc(vit->handle, "vit_" #SYM, &vit->SYM);                             \
+		if (!GET_PROC_success) {                                                                               \
+			return false;                                                                                  \
+		}                                                                                                      \
 	} while (0)
 
 	// Get the version first.
@@ -59,7 +64,8 @@ t_vit_bundle_load(struct t_vit_bundle *vit, const char *path)
 
 	// Check major version.
 	if (vit->version.major != VIT_HEADER_VERSION_MAJOR) {
-		U_LOG_E("Incompatible major version (supports %u) was: %u.%u.%u", VIT_HEADER_VERSION_MAJOR,
+		U_LOG_E("Incompatible versions: expecting %u.%u.%u but got %u.%u.%u",                 //
+		        VIT_HEADER_VERSION_MAJOR, VIT_HEADER_VERSION_MINOR, VIT_HEADER_VERSION_PATCH, //
 		        vit->version.major, vit->version.minor, vit->version.patch);
 		dlclose(vit->handle);
 		return false;
@@ -68,9 +74,9 @@ t_vit_bundle_load(struct t_vit_bundle *vit, const char *path)
 	GET_PROC(tracker_create);
 	GET_PROC(tracker_destroy);
 	GET_PROC(tracker_has_image_format);
-	GET_PROC(tracker_get_capabilities);
-	GET_PROC(tracker_get_pose_capabilities);
-	GET_PROC(tracker_set_pose_capabilities);
+	GET_PROC(tracker_get_supported_extensions);
+	GET_PROC(tracker_get_enabled_extensions);
+	GET_PROC(tracker_enable_extension);
 	GET_PROC(tracker_start);
 	GET_PROC(tracker_stop);
 	GET_PROC(tracker_reset);

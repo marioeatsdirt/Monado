@@ -1,4 +1,4 @@
-// Copyright 2021-2023, Collabora, Ltd.
+// Copyright 2021-2024, Collabora, Ltd.
 // SPDX-License-Identifier: BSL-1.0
 /*!
  * @file
@@ -44,6 +44,8 @@
 #include <string>
 #include <vector>
 
+#define PREFERRED_VIT_SYSTEM_LIBRARY "libbasalt.so"
+
 #define SLAM_TRACE(...) U_LOG_IFL_T(t.log_level, __VA_ARGS__)
 #define SLAM_DEBUG(...) U_LOG_IFL_D(t.log_level, __VA_ARGS__)
 #define SLAM_INFO(...) U_LOG_IFL_I(t.log_level, __VA_ARGS__)
@@ -71,7 +73,7 @@
 
 //! @see t_slam_tracker_config
 DEBUG_GET_ONCE_LOG_OPTION(slam_log, "SLAM_LOG", U_LOGGING_INFO)
-DEBUG_GET_ONCE_OPTION(vit_system_library_path, "VIT_SYSTEM_LIBRARY_PATH", NULL)
+DEBUG_GET_ONCE_OPTION(vit_system_library_path, "VIT_SYSTEM_LIBRARY_PATH", PREFERRED_VIT_SYSTEM_LIBRARY)
 DEBUG_GET_ONCE_OPTION(slam_config, "SLAM_CONFIG", nullptr)
 DEBUG_GET_ONCE_BOOL_OPTION(slam_ui, "SLAM_UI", false)
 DEBUG_GET_ONCE_BOOL_OPTION(slam_submit_from_start, "SLAM_SUBMIT_FROM_START", false)
@@ -254,13 +256,15 @@ struct TrackerSlam
 	struct xrt_tracked_slam base = {};
 	struct xrt_frame_node node = {};       //!< Will be called on destruction
 	struct t_vit_bundle vit;               //!< VIT system function pointers
-	enum vit_tracker_pose_capability caps; //!< VIT tracker bitfield capabilities
+	struct vit_tracker_extension_set exts; //!< VIT tracker supported extensions
 	struct vit_tracker *tracker;           //!< Pointer to the tracker created by the loaded VIT system;
 
 	struct xrt_slam_sinks sinks = {};                            //!< Pointers to the sinks below
 	struct xrt_frame_sink cam_sinks[XRT_TRACKING_MAX_SLAM_CAMS]; //!< Sends camera frames to the SLAM system
 	struct xrt_imu_sink imu_sink = {};                           //!< Sends imu samples to the SLAM system
 	struct xrt_pose_sink gt_sink = {};                           //!< Register groundtruth trajectory for stats
+	struct xrt_hand_masks_sink hand_masks_sink = {};             //!< Register latest masks to ignore
+
 	bool submit;        //!< Whether to submit data pushed to sinks to the SLAM tracker
 	uint32_t cam_count; //!< Number of cameras used for tracking
 
@@ -272,8 +276,10 @@ struct TrackerSlam
 	struct openvr_tracker *ovr_tracker;    //!< OpenVR lighthouse tracker
 
 	// Used mainly for checking that the timestamps come in order
-	timepoint_ns last_imu_ts;         //!< Last received IMU sample timestamp
-	vector<timepoint_ns> last_cam_ts; //!< Last received image timestamp per cam
+	timepoint_ns last_imu_ts;                     //!< Last received IMU sample timestamp
+	vector<timepoint_ns> last_cam_ts;             //!< Last received image timestamp per cam
+	struct xrt_hand_masks_sample last_hand_masks; //!< Last received hand masks info
+	Mutex last_hand_masks_mutex;                  //!< Mutex for @ref last_hand_masks
 
 	// Prediction
 
@@ -409,16 +415,15 @@ timing_ui_setup(TrackerSlam &t)
 		u_var_button &btn = t->timing.enable_btn;
 		bool e = !t->timing.enabled;
 		snprintf(btn.label, sizeof(btn.label), "%s", msg[e]);
-		vit_result_t vres =
-		    t->vit.tracker_set_pose_capabilities(t->tracker, VIT_TRACKER_POSE_CAPABILITY_TIMING, e);
+		vit_result_t vres = t->vit.tracker_enable_extension(t->tracker, VIT_TRACKER_EXTENSION_POSE_TIMING, e);
 		if (vres != VIT_SUCCESS) {
-			U_LOG_IFL_E(t->log_level, "Failed to set tracker timing capability");
+			U_LOG_IFL_E(t->log_level, "Failed to set tracker timing extension");
 			return;
 		}
 		t->timing.enabled = e;
 	};
 	t.timing.enable_btn.cb = cb;
-	t.timing.enable_btn.disabled = (t.caps & VIT_TRACKER_POSE_CAPABILITY_TIMING) == 0;
+	t.timing.enable_btn.disabled = !t.exts.has_pose_timing;
 	t.timing.enable_btn.ptr = &t;
 	u_var_add_button(&t, &t.timing.enable_btn, msg[t.timing.enabled]);
 
@@ -426,7 +431,7 @@ timing_ui_setup(TrackerSlam &t)
 	t.timing.columns = {"sampled", "received_by_monado"};
 
 	// Only fill the timing columns if the tracker supports pose timing
-	if ((t.caps & VIT_TRACKER_POSE_CAPABILITY_TIMING) != 0) {
+	if (t.exts.has_pose_timing) {
 		vit_tracker_timing_titles titles = {};
 		vit_result_t vres = t.vit.tracker_get_timing_titles(t.tracker, &titles);
 		if (vres != VIT_SUCCESS) {
@@ -530,16 +535,15 @@ features_ui_setup(TrackerSlam &t)
 		u_var_button &btn = t->features.enable_btn;
 		bool e = !t->features.enabled;
 		snprintf(btn.label, sizeof(btn.label), "%s", msg[e]);
-		vit_result_t vres =
-		    t->vit.tracker_set_pose_capabilities(t->tracker, VIT_TRACKER_POSE_CAPABILITY_FEATURES, e);
+		vit_result_t vres = t->vit.tracker_enable_extension(t->tracker, VIT_TRACKER_EXTENSION_POSE_FEATURES, e);
 		if (vres != VIT_SUCCESS) {
-			U_LOG_IFL_E(t->log_level, "Failed to set tracker features capability");
+			U_LOG_IFL_E(t->log_level, "Failed to set tracker features extension");
 			return;
 		}
 		t->features.enabled = e;
 	};
 	t.features.enable_btn.cb = cb;
-	t.features.enable_btn.disabled = (t.caps & VIT_TRACKER_POSE_CAPABILITY_FEATURES) == 0;
+	t.features.enable_btn.disabled = !t.exts.has_pose_features;
 	t.features.enable_btn.ptr = &t;
 	u_var_add_button(&t, &t.features.enable_btn, msg[t.features.enabled]);
 
@@ -1186,15 +1190,8 @@ add_imu_calibration(const TrackerSlam &t, const t_slam_imu_calibration *imu_cali
 static void
 send_calibration(const TrackerSlam &t, const t_slam_calibration &c)
 {
-	vit_tracker_capability_t caps;
-	vit_result_t vres = t.vit.tracker_get_capabilities(t.tracker, &caps);
-	if (vres != VIT_SUCCESS) {
-		SLAM_ERROR("Failed to get VIT tracker capabilities");
-		return;
-	}
-
 	// Try to send camera calibration data to the SLAM system
-	if ((caps & VIT_TRACKER_CAPABILITY_CAMERA_CALIBRATION) != 0) {
+	if (t.exts.has_add_camera_calibration) {
 		for (int i = 0; i < c.cam_count; i++) {
 			SLAM_INFO("Sending Camera %d calibration from Monado", i);
 			add_camera_calibration(t, &c.cams[i], i);
@@ -1204,7 +1201,7 @@ send_calibration(const TrackerSlam &t, const t_slam_calibration &c)
 	}
 
 	// Try to send IMU calibration data to the SLAM system
-	if ((caps & VIT_TRACKER_CAPABILITY_IMU_CALIBRATION) != 0) {
+	if (t.exts.has_add_imu_calibration) {
 		SLAM_INFO("Sending IMU calibration from Monado");
 		add_imu_calibration(t, &c.imu);
 	} else {
@@ -1268,6 +1265,17 @@ t_slam_gt_sink_push(struct xrt_pose_sink *sink, xrt_pose_sample *sample)
 
 	t.gt.trajectory->insert_or_assign(sample->timestamp_ns, sample->pose);
 	xrt_sink_push_pose(t.euroc_recorder->gt, sample);
+}
+
+//! Receive and register masks to use in the next image
+extern "C" void
+t_slam_hand_mask_sink_push(struct xrt_hand_masks_sink *sink, struct xrt_hand_masks_sample *hand_masks)
+{
+	XRT_TRACE_MARKER();
+
+	auto &t = *container_of(sink, TrackerSlam, hand_masks_sink);
+	unique_lock lock(t.last_hand_masks_mutex);
+	t.last_hand_masks = *hand_masks;
 }
 
 //! Receive and send IMU samples to the external SLAM system
@@ -1362,7 +1370,30 @@ receive_frame(TrackerSlam &t, struct xrt_frame *frame, uint32_t cam_index)
 	default: SLAM_ERROR("Unknown image format"); return;
 	}
 
-	// TODO masks
+	xrt_hand_masks_sample hand_masks{};
+	{
+		unique_lock lock(t.last_hand_masks_mutex);
+		hand_masks = t.last_hand_masks;
+	}
+
+	auto &view = hand_masks.views[cam_index];
+	std::vector<vit_mask_t> masks;
+	if (view.enabled) {
+		for (auto &hand : view.hands) {
+			if (!hand.enabled) {
+				continue;
+			}
+			vit_mask_t mask{};
+			mask.x = hand.rect.x;
+			mask.y = hand.rect.y;
+			mask.w = hand.rect.w;
+			mask.h = hand.rect.h;
+			masks.push_back(mask);
+		}
+
+		sample.mask_count = masks.size();
+		sample.masks = masks.empty() ? nullptr : masks.data();
+	}
 
 	{
 		XRT_TRACE_IDENT(slam_push);
@@ -1494,13 +1525,7 @@ t_slam_create(struct xrt_frame_context *xfctx,
 
 	t.log_level = log_level;
 
-	if (config->vit_system_library_path == NULL) {
-		SLAM_WARN("No VIT system library set, use VIT_SYSTEM_LIBRARY_PATH to set a tracker");
-		SLAM_WARN("Attempting to load 'libbasalt.so' from system");
-		config->vit_system_library_path = "libbasalt.so";
-	}
-
-	SLAM_INFO("Loading VIT system library from '%s'", config->vit_system_library_path);
+	SLAM_INFO("Loading VIT system library from VIT_SYSTEM_LIBRARY_PATH='%s'", config->vit_system_library_path);
 
 	if (!t_vit_bundle_load(&t.vit, config->vit_system_library_path)) {
 		SLAM_ERROR("Failed to load VIT system library from '%s'", config->vit_system_library_path);
@@ -1522,13 +1547,13 @@ t_slam_create(struct xrt_frame_context *xfctx,
 
 	vit_result_t vres = t.vit.tracker_create(&system_config, &t.tracker);
 	if (vres != VIT_SUCCESS) {
-		SLAM_ERROR("Failed to create VIT tracker");
+		SLAM_ERROR("Failed to create VIT tracker (%d)", vres);
 		return -1;
 	}
 
-	vres = t.vit.tracker_get_pose_capabilities(t.tracker, &t.caps);
+	vres = t.vit.tracker_get_supported_extensions(t.tracker, &t.exts);
 	if (vres != VIT_SUCCESS) {
-		SLAM_ERROR("Failed to get VIT tracker pose capabilities");
+		SLAM_ERROR("Failed to get VIT tracker supported extensions (%d)", vres);
 		return -1;
 	}
 
@@ -1554,6 +1579,9 @@ t_slam_create(struct xrt_frame_context *xfctx,
 	t.gt_sink.push_pose = t_slam_gt_sink_push;
 	t.sinks.gt = &t.gt_sink;
 
+	t.hand_masks_sink.push_hand_masks = t_slam_hand_mask_sink_push;
+	t.sinks.hand_masks = &t.hand_masks_sink;
+
 	t.submit = config->submit_from_start;
 	t.cam_count = config->cam_count;
 
@@ -1566,6 +1594,7 @@ t_slam_create(struct xrt_frame_context *xfctx,
 
 	t.last_imu_ts = INT64_MIN;
 	t.last_cam_ts = vector<timepoint_ns>(t.cam_count, INT64_MIN);
+	t.last_hand_masks = xrt_hand_masks_sample{};
 
 	t.pred_type = config->prediction;
 
