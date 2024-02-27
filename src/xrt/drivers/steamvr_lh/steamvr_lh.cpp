@@ -657,7 +657,13 @@ steamvr_lh_get_devices(struct xrt_device **out_xdevs)
 	// The driver likes to create a bunch of transient folder - lets make sure they're created where they normally
 	// are.
 	std::filesystem::current_path(STEAM_INSTALL_DIR + "/config/lighthouse");
-	std::string steamvr = find_steamvr_install();
+	std::string steamvr{};
+	if (getenv("STEAMVR_PATH") != nullptr) {
+		steamvr = getenv("STEAMVR_PATH");
+	} else {
+		steamvr = find_steamvr_install();
+	}
+
 	if (steamvr.empty()) {
 		U_LOG_IFL_E(level, "Could not find where SteamVR is installed!");
 		return 0;
