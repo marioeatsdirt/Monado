@@ -646,6 +646,12 @@ oxr_xrLocateBodyJointsFB(XrBodyTrackerFB bodyTracker,
                          XrBodyJointLocationsFB *locations);
 #endif
 
+#ifdef OXR_HAVE_META_body_tracking_fidelity
+//! OpenXR API function @ep{xrRequestBodyTrackingFidelityMETA}
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrRequestBodyTrackingFidelityMETA(XrBodyTrackerFB bodyTracker, const XrBodyTrackingFidelityMETA fidelity);
+#endif
+
 /*!
  * @}
  */
