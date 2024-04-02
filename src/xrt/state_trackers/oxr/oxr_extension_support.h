@@ -618,6 +618,18 @@
 #define OXR_EXTENSION_SUPPORT_FB_body_tracking(_)
 #endif
 
+
+/*
+ * XR_META_body_tracking_full_body
+ */
+#if defined(XR_META_body_tracking_full_body) && defined(XRT_FEATURE_OPENXR_BODY_TRACKING_FULL_BODY_META)
+#define OXR_HAVE_META_body_tracking_full_body
+#define OXR_EXTENSION_SUPPORT_META_body_tracking_full_body(_)                                                          \
+	_(META_body_tracking_full_body, META_BODY_TRACKING_FULL_BODY)
+#else
+#define OXR_EXTENSION_SUPPORT_META_body_tracking_full_body(_)
+#endif
+
 // end of GENERATED per-extension defines - do not modify - used by scripts
 
 /*!
@@ -694,5 +706,6 @@
     OXR_EXTENSION_SUPPORT_MNDX_hydra(_) \
     OXR_EXTENSION_SUPPORT_MNDX_system_buttons(_) \
     OXR_EXTENSION_SUPPORT_HTC_facial_tracking(_) \
-    OXR_EXTENSION_SUPPORT_FB_body_tracking(_)
+    OXR_EXTENSION_SUPPORT_FB_body_tracking(_) \
+    OXR_EXTENSION_SUPPORT_META_body_tracking_full_body(_)
 // clang-format on
