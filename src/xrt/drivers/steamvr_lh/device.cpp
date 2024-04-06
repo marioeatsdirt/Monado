@@ -660,8 +660,8 @@ Device::init_chaperone(const std::string &steam_install)
 void
 Device::update_pose(const vr::DriverPose_t &newPose) const
 {
-	xrt_space_relation relation = {};
-	if (newPose.poseIsValid && newPose.deviceIsConnected) {
+	xrt_space_relation relation;
+	if (newPose.result == vr::TrackingResult_Running_OK) {
 		relation.relation_flags = XRT_SPACE_RELATION_BITMASK_ALL;
 		relation.pose = copy_pose(newPose.qRotation, newPose.vecPosition);
 		relation.linear_velocity = copy_vec3(newPose.vecVelocity);
