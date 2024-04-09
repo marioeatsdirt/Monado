@@ -694,7 +694,7 @@ get_roles(struct xrt_system_devices *xsysd, struct xrt_system_roles *out_roles)
 	out_roles->gamepad = svrs->gamepad_index;
 
 	// We have to at least bump the generation counter once here if it's untouched
-	// This sets the inital roles
+	// This sets the initial roles
 	if (out_roles->generation_id == 0) {
 		out_roles->generation_id++;
 	}
@@ -710,7 +710,9 @@ destroy(struct xrt_system_devices *xsysd)
 }
 
 extern "C" enum xrt_result
-steamvr_lh_create_devices(struct xrt_session_event_sink *broadcast, struct xrt_system_devices **out_xsysd, struct xrt_space_overseer **out_xso)
+steamvr_lh_create_devices(struct xrt_session_event_sink *broadcast,
+                          struct xrt_system_devices **out_xsysd,
+                          struct xrt_space_overseer **out_xso)
 {
 	u_logging_level level = debug_get_log_option_lh_log();
 	// The driver likes to create a bunch of transient folder - lets make sure they're created where they normally
@@ -809,7 +811,8 @@ steamvr_lh_create_devices(struct xrt_session_event_sink *broadcast, struct xrt_s
 		}
 	}
 
-	u_device_assign_xdev_roles(xsysd->xdevs, xsysd->xdev_count, &svrs->head_index, &svrs->left_index, &svrs->right_index);
+	u_device_assign_xdev_roles(xsysd->xdevs, xsysd->xdev_count, &svrs->head_index, &svrs->left_index,
+	                           &svrs->right_index);
 
 	if (svrs->left_index >= 0) {
 		left = xsysd->xdevs[svrs->left_index];
@@ -839,7 +842,7 @@ steamvr_lh_create_devices(struct xrt_session_event_sink *broadcast, struct xrt_s
 	    right,                              // right
 	    xsysd->xdevs,                       // xdevs
 	    xsysd->xdev_count,                  // xdev_count
-		false,								// root_is_unbounded
+	    false,                              // root_is_unbounded
 	    out_xso);                           // out_xso
 
 	return xrt_result::XRT_SUCCESS;
