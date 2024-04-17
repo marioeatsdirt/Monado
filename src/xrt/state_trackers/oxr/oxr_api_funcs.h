@@ -626,6 +626,43 @@ XRAPI_ATTR XrResult XRAPI_CALL
 oxr_xrGetFacialExpressionsHTC(XrFacialTrackerHTC facialTracker, XrFacialExpressionsHTC *facialExpressions);
 #endif
 
+#ifdef OXR_HAVE_FB_body_tracking
+//! OpenXR API function @ep{xrCreateBodyTrackerFB}
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrCreateBodyTrackerFB(XrSession session, const XrBodyTrackerCreateInfoFB *createInfo, XrBodyTrackerFB *bodyTracker);
+
+//! OpenXR API function @ep{xrDestroyBodyTrackerFB}
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrDestroyBodyTrackerFB(XrBodyTrackerFB bodyTracker);
+
+//! OpenXR API function @ep{xrGetBodySkeletonFB}
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrGetBodySkeletonFB(XrBodyTrackerFB bodyTracker, XrBodySkeletonFB *skeleton);
+
+//! OpenXR API function @ep{xrLocateBodyJointsFB}
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrLocateBodyJointsFB(XrBodyTrackerFB bodyTracker,
+                         const XrBodyJointsLocateInfoFB *locateInfo,
+                         XrBodyJointLocationsFB *locations);
+#endif
+
+#ifdef OXR_HAVE_META_body_tracking_fidelity
+//! OpenXR API function @ep{xrRequestBodyTrackingFidelityMETA}
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrRequestBodyTrackingFidelityMETA(XrBodyTrackerFB bodyTracker, const XrBodyTrackingFidelityMETA fidelity);
+#endif
+
+#ifdef OXR_HAVE_META_body_tracking_calibration
+//! OpenXR API function @ep{xrResetBodyTrackingCalibrationMETA}
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrResetBodyTrackingCalibrationMETA(XrBodyTrackerFB bodyTracker);
+
+//! OpenXR API function @ep{xrSuggestBodyTrackingCalibrationOverrideMETA}
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrSuggestBodyTrackingCalibrationOverrideMETA(XrBodyTrackerFB bodyTracker,
+                                                 const XrBodyTrackingCalibrationInfoMETA *calibrationInfo);
+#endif
+
 /*!
  * @}
  */

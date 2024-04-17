@@ -44,6 +44,10 @@ struct xrt_instance_info
 	bool ext_eye_gaze_interaction_enabled;
 	bool ext_hand_interaction_enabled;
 	bool htc_facial_tracking_enabled;
+	bool fb_body_tracking_enabled;
+	bool meta_body_tracking_full_body_enabled;
+	bool meta_body_tracking_fidelity_enabled;
+	bool meta_body_tracking_calibration_enabled;
 };
 
 /*!

@@ -18,6 +18,10 @@
 #include "util/u_debug.h"
 #include "util/u_trace_marker.h"
 
+#include "math/m_api.h"
+#include "math/m_mathinclude.h"
+#include "math/m_space.h"
+
 #include "oxr_objects.h"
 #include "oxr_logger.h"
 #include "oxr_two_call.h"
@@ -26,6 +30,7 @@
 #include "oxr_api_verify.h"
 #include "oxr_handle.h"
 #include "oxr_chain.h"
+#include "oxr_conversions.h"
 
 
 XRAPI_ATTR XrResult XRAPI_CALL
@@ -843,4 +848,334 @@ oxr_xrGetFacialExpressionsHTC(XrFacialTrackerHTC facialTracker, XrFacialExpressi
 
 	return XR_SUCCESS;
 }
+#endif
+
+#ifdef OXR_HAVE_FB_body_tracking
+static enum xrt_body_joint_set_type_fb
+oxr_to_xrt_body_joint_set_type_fb(XrBodyJointSetFB joint_set_type)
+{
+#ifdef OXR_HAVE_META_body_tracking_full_body
+	if (joint_set_type == XR_BODY_JOINT_SET_FULL_BODY_META) {
+		return XRT_BODY_JOINT_SET_FULL_BODY_META;
+	}
+#endif
+	if (joint_set_type == XR_BODY_JOINT_SET_DEFAULT_FB) {
+		return XRT_BODY_JOINT_SET_DEFAULT_FB;
+	}
+	return XRT_BODY_JOINT_SET_UNKNOWN;
+}
+
+static XrResult
+oxr_body_tracker_fb_destroy_cb(struct oxr_logger *log, struct oxr_handle_base *hb)
+{
+	struct oxr_body_tracker_fb *body_tracker_fb = (struct oxr_body_tracker_fb *)hb;
+	free(body_tracker_fb);
+	return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrCreateBodyTrackerFB(XrSession session, const XrBodyTrackerCreateInfoFB *createInfo, XrBodyTrackerFB *bodyTracker)
+{
+	OXR_TRACE_MARKER();
+
+	struct oxr_logger log;
+	XrResult ret = XR_SUCCESS;
+	struct oxr_session *sess = NULL;
+	OXR_VERIFY_SESSION_AND_INIT_LOG(&log, session, sess, "xrCreateBodyTrackerFB");
+	OXR_VERIFY_SESSION_NOT_LOST(&log, sess);
+	OXR_VERIFY_ARG_TYPE_AND_NOT_NULL(&log, createInfo, XR_TYPE_BODY_TRACKER_CREATE_INFO_FB);
+	OXR_VERIFY_EXTENSION(&log, sess->sys->inst, FB_body_tracking);
+#ifdef OXR_HAVE_META_body_tracking_full_body
+	if (createInfo->bodyJointSet == XR_BODY_JOINT_SET_FULL_BODY_META) {
+		OXR_VERIFY_EXTENSION(&log, sess->sys->inst, META_body_tracking_full_body);
+	}
+#endif
+
+	if (!oxr_system_get_body_tracking_fb_support(&log, sess->sys->inst)) {
+		return oxr_error(&log, XR_ERROR_FEATURE_UNSUPPORTED, "System does not support FB body tracking");
+	}
+
+	const enum xrt_body_joint_set_type_fb joint_set_type =
+	    oxr_to_xrt_body_joint_set_type_fb(createInfo->bodyJointSet);
+
+	if (joint_set_type == XRT_BODY_JOINT_SET_UNKNOWN) {
+		return oxr_error(&log, XR_ERROR_FEATURE_UNSUPPORTED,
+		                 "\"bodyJointSet\" set to an unknown body joint set type");
+	}
+
+#ifdef OXR_HAVE_META_body_tracking_full_body
+	if (joint_set_type == XRT_BODY_JOINT_SET_FULL_BODY_META) {
+		if (!oxr_system_get_full_body_tracking_meta_support(&log, sess->sys->inst)) {
+			return oxr_error(&log, XR_ERROR_FEATURE_UNSUPPORTED,
+			                 "System does not support META full body tracking");
+		}
+	}
+#endif
+
+	struct xrt_device *xdev = GET_XDEV_BY_ROLE(sess->sys, body);
+	if (xdev == NULL || !xdev->body_tracking_supported) {
+		return oxr_error(&log, XR_ERROR_FEATURE_UNSUPPORTED, "No device found for body tracking role");
+	}
+
+	struct oxr_body_tracker_fb *body_tracker_fb = NULL;
+	OXR_ALLOCATE_HANDLE_OR_RETURN(&log, body_tracker_fb, OXR_XR_DEBUG_BTRACKER, oxr_body_tracker_fb_destroy_cb,
+	                              &sess->handle);
+
+	body_tracker_fb->sess = sess;
+	body_tracker_fb->xdev = xdev;
+	body_tracker_fb->joint_set_type = joint_set_type;
+
+	OXR_VERIFY_ARG_NOT_NULL(&log, body_tracker_fb);
+	*bodyTracker = oxr_body_tracker_fb_to_openxr(body_tracker_fb);
+
+	return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrDestroyBodyTrackerFB(XrBodyTrackerFB bodyTracker)
+{
+	OXR_TRACE_MARKER();
+
+	struct oxr_logger log;
+	struct oxr_body_tracker_fb *body_tracker_fb = NULL;
+	OXR_VERIFY_BODY_TRACKER_FB_AND_INIT_LOG(&log, bodyTracker, body_tracker_fb, "xrDestroyBodyTrackerFB");
+
+	return oxr_handle_destroy(&log, &body_tracker_fb->handle);
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrGetBodySkeletonFB(XrBodyTrackerFB bodyTracker, XrBodySkeletonFB *skeleton)
+{
+	OXR_TRACE_MARKER();
+
+	struct oxr_logger log;
+	struct oxr_body_tracker_fb *body_tracker_fb = NULL;
+	OXR_VERIFY_BODY_TRACKER_FB_AND_INIT_LOG(&log, bodyTracker, body_tracker_fb, "xrGetBodySkeletonFB");
+	OXR_VERIFY_SESSION_NOT_LOST(&log, body_tracker_fb->sess);
+	OXR_VERIFY_ARG_NOT_NULL(&log, body_tracker_fb->xdev);
+	OXR_VERIFY_ARG_TYPE_AND_NOT_NULL(&log, skeleton, XR_TYPE_BODY_SKELETON_FB);
+
+	if (body_tracker_fb->xdev == NULL || !body_tracker_fb->xdev->body_tracking_supported) {
+		return oxr_error(&log, XR_ERROR_FUNCTION_UNSUPPORTED,
+		                 "Device not found or does not support body tracking.");
+	}
+
+	const bool is_meta_full_body = body_tracker_fb->joint_set_type == XRT_BODY_JOINT_SET_FULL_BODY_META;
+	const uint32_t body_joint_count = is_meta_full_body ? XRT_FULL_BODY_JOINT_COUNT_META : XRT_BODY_JOINT_COUNT_FB;
+
+	if (skeleton->jointCount < body_joint_count) {
+		return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE, "joint count is too small");
+	}
+
+	struct xrt_body_skeleton body_skeleton_result = {0};
+	struct xrt_body_skeleton_joint_fb *src_skeleton_joints =
+	    is_meta_full_body ? body_skeleton_result.full_body_skeleton_meta.joints
+	                      : body_skeleton_result.body_skeleton_fb.joints;
+
+	const enum xrt_input_name input_name =
+	    is_meta_full_body ? XRT_INPUT_META_FULL_BODY_TRACKING : XRT_INPUT_FB_BODY_TRACKING;
+
+	if (xrt_device_get_body_skeleton(body_tracker_fb->xdev, input_name, &body_skeleton_result) != XRT_SUCCESS) {
+		return oxr_error(&log, XR_ERROR_RUNTIME_FAILURE, "Failed to get body skeleton");
+	}
+
+	for (size_t joint_index = 0; joint_index < body_joint_count; ++joint_index) {
+		const struct xrt_body_skeleton_joint_fb *src_skeleton_joint = &src_skeleton_joints[joint_index];
+		XrBodySkeletonJointFB *dst_skeleton_joint = &skeleton->joints[joint_index];
+		OXR_XRT_POSE_TO_XRPOSEF(src_skeleton_joint->pose, dst_skeleton_joint->pose);
+		dst_skeleton_joint->joint = src_skeleton_joint->joint;
+		dst_skeleton_joint->parentJoint = src_skeleton_joint->parent_joint;
+	}
+
+	return XR_SUCCESS;
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrLocateBodyJointsFB(XrBodyTrackerFB bodyTracker,
+                         const XrBodyJointsLocateInfoFB *locateInfo,
+                         XrBodyJointLocationsFB *locations)
+{
+	OXR_TRACE_MARKER();
+
+	struct oxr_logger log;
+	struct oxr_space *base_spc = NULL;
+	struct oxr_body_tracker_fb *body_tracker_fb = NULL;
+	OXR_VERIFY_BODY_TRACKER_FB_AND_INIT_LOG(&log, bodyTracker, body_tracker_fb, "xrLocateBodyJointsFB");
+	OXR_VERIFY_ARG_TYPE_AND_NOT_NULL(&log, locateInfo, XR_TYPE_BODY_JOINTS_LOCATE_INFO_FB);
+	OXR_VERIFY_ARG_TYPE_AND_NOT_NULL(&log, locations, XR_TYPE_BODY_JOINT_LOCATIONS_FB);
+	OXR_VERIFY_SESSION_NOT_LOST(&log, body_tracker_fb->sess);
+	OXR_VERIFY_ARG_NOT_NULL(&log, body_tracker_fb->xdev);
+	OXR_VERIFY_ARG_NOT_NULL(&log, locations->jointLocations);
+	OXR_VERIFY_SPACE_NOT_NULL(&log, locateInfo->baseSpace, base_spc);
+
+	if (body_tracker_fb->xdev == NULL || !body_tracker_fb->xdev->body_tracking_supported) {
+		return oxr_error(&log, XR_ERROR_FUNCTION_UNSUPPORTED,
+		                 "Device not found or does not support body tracking.");
+	}
+
+	const bool is_meta_full_body = body_tracker_fb->joint_set_type == XRT_BODY_JOINT_SET_FULL_BODY_META;
+	const uint32_t body_joint_count = is_meta_full_body ? XRT_FULL_BODY_JOINT_COUNT_META : XRT_BODY_JOINT_COUNT_FB;
+
+	if (locations->jointCount < body_joint_count) {
+		return oxr_error(&log, XR_ERROR_VALIDATION_FAILURE, "joint count is too small");
+	}
+
+	if (locateInfo->time <= (XrTime)0) {
+		return oxr_error(&log, XR_ERROR_TIME_INVALID, "(time == %" PRIi64 ") is not a valid time.",
+		                 locateInfo->time);
+	}
+
+	const struct oxr_instance *inst = body_tracker_fb->sess->sys->inst;
+	const uint64_t at_timestamp_ns = time_state_ts_to_monotonic_ns(inst->timekeeping, locateInfo->time);
+
+	struct xrt_body_joint_set body_joint_set_result = {0};
+	const struct xrt_body_joint_location_fb *src_body_joints =
+	    is_meta_full_body ? body_joint_set_result.full_body_joint_set_meta.joint_locations
+	                      : body_joint_set_result.body_joint_set_fb.joint_locations;
+
+	const enum xrt_input_name input_name =
+	    is_meta_full_body ? XRT_INPUT_META_FULL_BODY_TRACKING : XRT_INPUT_FB_BODY_TRACKING;
+
+	if (xrt_device_get_body_joints(body_tracker_fb->xdev, input_name, at_timestamp_ns, &body_joint_set_result) !=
+	    XRT_SUCCESS) {
+		return oxr_error(&log, XR_ERROR_RUNTIME_FAILURE, "Failed to get FB body joint set");
+	}
+
+	// Get the body pose in the base space.
+	struct xrt_space_relation T_base_body;
+	const XrResult ret = oxr_get_base_body_pose(&log, &body_joint_set_result, base_spc, body_tracker_fb->xdev,
+	                                            locateInfo->time, &T_base_body);
+	if (ret != XR_SUCCESS) {
+		locations->isActive = XR_FALSE;
+		return ret;
+	}
+
+	const struct xrt_base_body_joint_set_meta *body_joint_set_fb = &body_joint_set_result.base_body_joint_set_meta;
+
+	locations->isActive = body_joint_set_fb->is_active;
+	if (!body_joint_set_fb->is_active || T_base_body.relation_flags == 0) {
+		locations->isActive = XR_FALSE;
+		for (size_t joint_index = 0; joint_index < XRT_BODY_JOINT_COUNT_FB; ++joint_index) {
+			locations->jointLocations[joint_index].locationFlags = XRT_SPACE_RELATION_BITMASK_NONE;
+		}
+		return XR_SUCCESS;
+	}
+
+	locations->time = time_state_monotonic_to_ts_ns(inst->timekeeping, body_joint_set_fb->sample_time_ns);
+
+	locations->confidence = body_joint_set_fb->confidence;
+	locations->skeletonChangedCount = body_joint_set_fb->skeleton_changed_count;
+
+	for (size_t joint_index = 0; joint_index < body_joint_count; ++joint_index) {
+		const struct xrt_body_joint_location_fb *src_joint = &src_body_joints[joint_index];
+		XrBodyJointLocationFB *dst_joint = &locations->jointLocations[joint_index];
+
+		dst_joint->locationFlags = xrt_to_xr_space_location_flags(src_joint->relation.relation_flags);
+
+		struct xrt_space_relation result;
+		struct xrt_relation_chain chain = {0};
+		m_relation_chain_push_relation(&chain, &src_joint->relation);
+		m_relation_chain_push_relation(&chain, &T_base_body);
+		m_relation_chain_resolve(&chain, &result);
+		OXR_XRT_POSE_TO_XRPOSEF(result.pose, dst_joint->pose);
+	}
+
+#ifdef OXR_HAVE_META_body_tracking_fidelity
+	XrBodyTrackingFidelityStatusMETA *fidelity_status = OXR_GET_OUTPUT_FROM_CHAIN(
+	    locations, XR_TYPE_BODY_TRACKING_FIDELITY_STATUS_META, XrBodyTrackingFidelityStatusMETA);
+	if (fidelity_status != NULL) {
+		OXR_VERIFY_EXTENSION(&log, body_tracker_fb->sess->sys->inst, META_body_tracking_fidelity);
+		if (!body_tracker_fb->xdev->body_tracking_fidelity_supported) {
+			return oxr_error(&log, XR_ERROR_FEATURE_UNSUPPORTED,
+			                 "body tracking device does not support XR_META_body_tracking_fidelity");
+		}
+		fidelity_status->fidelity = (XrBodyTrackingFidelityMETA)body_joint_set_fb->exts.fidelity_status;
+	}
+#endif
+
+#ifdef OXR_HAVE_META_body_tracking_calibration
+	XrBodyTrackingCalibrationStatusMETA *calibration_status = OXR_GET_OUTPUT_FROM_CHAIN(
+	    locations, XR_TYPE_BODY_TRACKING_CALIBRATION_STATUS_META, XrBodyTrackingCalibrationStatusMETA);
+	if (calibration_status != NULL) {
+		OXR_VERIFY_EXTENSION(&log, body_tracker_fb->sess->sys->inst, META_body_tracking_calibration);
+		if (!body_tracker_fb->xdev->body_tracking_calibration_supported) {
+			return oxr_error(&log, XR_ERROR_FEATURE_UNSUPPORTED,
+			                 "body tracking device does not support XR_META_body_tracking_calibration");
+		}
+		calibration_status->status =
+		    (XrBodyTrackingCalibrationStateMETA)body_joint_set_fb->exts.calibration_status;
+	}
+#endif
+
+	return XR_SUCCESS;
+}
+
+#ifdef OXR_HAVE_META_body_tracking_fidelity
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrRequestBodyTrackingFidelityMETA(XrBodyTrackerFB bodyTracker, const XrBodyTrackingFidelityMETA fidelity)
+{
+	OXR_TRACE_MARKER();
+
+	struct oxr_logger log;
+	struct oxr_body_tracker_fb *body_tracker_fb = NULL;
+	OXR_VERIFY_BODY_TRACKER_FB_AND_INIT_LOG(&log, bodyTracker, body_tracker_fb,
+	                                        "xrRequestBodyTrackingFidelityMETA");
+	OXR_VERIFY_SESSION_NOT_LOST(&log, body_tracker_fb->sess);
+	OXR_VERIFY_ARG_NOT_NULL(&log, body_tracker_fb->xdev);
+	OXR_VERIFY_EXTENSION(&log, body_tracker_fb->sess->sys->inst, META_body_tracking_fidelity);
+
+	if (!body_tracker_fb->xdev->body_tracking_fidelity_supported) {
+		return oxr_error(&log, XR_ERROR_FEATURE_UNSUPPORTED,
+		                 "Body tracking device does not support this operation");
+	}
+	return xrt_device_set_body_tracking_fidelity_meta(body_tracker_fb->xdev,
+	                                                  (enum xrt_body_tracking_fidelity_meta)fidelity);
+}
+#endif
+
+#ifdef OXR_HAVE_META_body_tracking_calibration
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrResetBodyTrackingCalibrationMETA(XrBodyTrackerFB bodyTracker)
+{
+	OXR_TRACE_MARKER();
+
+	struct oxr_logger log;
+	struct oxr_body_tracker_fb *body_tracker_fb = NULL;
+	OXR_VERIFY_BODY_TRACKER_FB_AND_INIT_LOG(&log, bodyTracker, body_tracker_fb,
+	                                        "xrResetBodyTrackingCalibrationMETA");
+	OXR_VERIFY_SESSION_NOT_LOST(&log, body_tracker_fb->sess);
+	OXR_VERIFY_ARG_NOT_NULL(&log, body_tracker_fb->xdev);
+	OXR_VERIFY_EXTENSION(&log, body_tracker_fb->sess->sys->inst, META_body_tracking_calibration);
+
+	if (!body_tracker_fb->xdev->body_tracking_calibration_supported) {
+		return oxr_error(&log, XR_ERROR_FEATURE_UNSUPPORTED,
+		                 "Body tracking device does not support this operation");
+	}
+	return xrt_device_reset_body_tracking_calibration_meta(body_tracker_fb->xdev);
+}
+
+XRAPI_ATTR XrResult XRAPI_CALL
+oxr_xrSuggestBodyTrackingCalibrationOverrideMETA(XrBodyTrackerFB bodyTracker,
+                                                 const XrBodyTrackingCalibrationInfoMETA *calibrationInfo)
+{
+	OXR_TRACE_MARKER();
+
+	struct oxr_logger log;
+	struct oxr_body_tracker_fb *body_tracker_fb = NULL;
+	OXR_VERIFY_BODY_TRACKER_FB_AND_INIT_LOG(&log, bodyTracker, body_tracker_fb,
+	                                        "xrSuggestBodyTrackingCalibrationOverrideMETA");
+	OXR_VERIFY_SESSION_NOT_LOST(&log, body_tracker_fb->sess);
+	OXR_VERIFY_ARG_NOT_NULL(&log, body_tracker_fb->xdev);
+	OXR_VERIFY_EXTENSION(&log, body_tracker_fb->sess->sys->inst, META_body_tracking_calibration);
+	OXR_VERIFY_ARG_TYPE_AND_NOT_NULL(&log, calibrationInfo, XR_TYPE_BODY_TRACKING_CALIBRATION_INFO_META);
+
+	if (!body_tracker_fb->xdev->body_tracking_calibration_supported) {
+		return oxr_error(&log, XR_ERROR_FEATURE_UNSUPPORTED,
+		                 "Body tracking device does not support this operation");
+	}
+	return xrt_device_set_body_tracking_calibration_override_meta(body_tracker_fb->xdev,
+	                                                              calibrationInfo->bodyHeight);
+}
+#endif
+
 #endif

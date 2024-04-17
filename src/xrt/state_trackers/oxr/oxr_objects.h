@@ -122,6 +122,8 @@ struct oxr_action_set_ref;
 struct oxr_action_ref;
 struct oxr_hand_tracker;
 struct oxr_facial_tracker_htc;
+struct oxr_facial_tracker_fb;
+struct oxr_body_tracker_fb;
 
 #define XRT_MAX_HANDLE_CHILDREN 256
 #define OXR_MAX_BINDINGS_PER_ACTION 32
@@ -393,6 +395,19 @@ static inline XrFacialTrackerHTC
 oxr_facial_tracker_htc_to_openxr(struct oxr_facial_tracker_htc *face_tracker_htc)
 {
 	return XRT_CAST_PTR_TO_OXR_HANDLE(XrFacialTrackerHTC, face_tracker_htc);
+}
+#endif
+
+#ifdef OXR_HAVE_FB_body_tracking
+/*!
+ * To go back to a OpenXR object.
+ *
+ * @relates oxr_facial_tracker_htc
+ */
+static inline XrBodyTrackerFB
+oxr_body_tracker_fb_to_openxr(struct oxr_body_tracker_fb *body_tracker_fb)
+{
+	return XRT_CAST_PTR_TO_OXR_HANDLE(XrBodyTrackerFB, body_tracker_fb);
 }
 #endif
 
@@ -777,6 +792,17 @@ oxr_session_hand_joints(struct oxr_logger *log,
                         const XrHandJointsLocateInfoEXT *locateInfo,
                         XrHandJointLocationsEXT *locations);
 
+/*
+ * Gets the body pose in the base space.
+ */
+XrResult
+oxr_get_base_body_pose(struct oxr_logger *log,
+                       const struct xrt_body_joint_set *body_joint_set,
+                       struct oxr_space *base_spc,
+                       struct xrt_device *body_xdev,
+                       XrTime at_time,
+                       struct xrt_space_relation *out_base_body);
+
 XrResult
 oxr_session_apply_force_feedback(struct oxr_logger *log,
                                  struct oxr_hand_tracker *hand_tracker,
@@ -981,6 +1007,17 @@ oxr_system_get_face_tracking_htc_support(struct oxr_logger *log,
                                          bool *supports_eye,
                                          bool *supports_lip);
 
+bool
+oxr_system_get_body_tracking_fb_support(struct oxr_logger *log, struct oxr_instance *inst);
+
+bool
+oxr_system_get_full_body_tracking_meta_support(struct oxr_logger *log, struct oxr_instance *inst);
+
+bool
+oxr_system_get_body_tracking_fidelity_meta_support(struct oxr_logger *log, struct oxr_instance *inst);
+
+bool
+oxr_system_get_body_tracking_calibration_meta_support(struct oxr_logger *log, struct oxr_instance *inst);
 
 /*
  *
@@ -1415,6 +1452,7 @@ struct oxr_system
 static inline struct xrt_device *get_role_head(struct oxr_system *sys) {return sys->xsysd->static_roles.head; }
 static inline struct xrt_device *get_role_eyes(struct oxr_system *sys) {return sys->xsysd->static_roles.eyes; }
 static inline struct xrt_device *get_role_face(struct oxr_system* sys) { return sys->xsysd->static_roles.face; }
+static inline struct xrt_device *get_role_body(struct oxr_system* sys) { return sys->xsysd->static_roles.body; }
 static inline struct xrt_device *get_role_hand_tracking_left(struct oxr_system* sys) { return sys->xsysd->static_roles.hand_tracking.left; }
 static inline struct xrt_device *get_role_hand_tracking_right(struct oxr_system* sys) { return sys->xsysd->static_roles.hand_tracking.right; }
 // clang-format on
@@ -1452,6 +1490,11 @@ get_role_profile_eyes(struct oxr_system *sys)
 }
 static inline enum xrt_device_name
 get_role_profile_face(struct oxr_system *sys)
+{
+	return XRT_DEVICE_INVALID;
+}
+static inline enum xrt_device_name
+get_role_profile_body(struct oxr_system *sys)
 {
 	return XRT_DEVICE_INVALID;
 }
@@ -2598,6 +2641,29 @@ struct oxr_facial_tracker_htc
 
 	//! Type of facial tracking, eyes or lips
 	enum xrt_facial_tracking_type_htc facial_tracking_type;
+};
+
+/*!
+ * FB specific Body tracker.
+ *
+ * Parent type/handle is @ref oxr_instance
+ *
+ * @obj{XrBodyTrackerFB}
+ * @extends oxr_handle_base
+ */
+struct oxr_body_tracker_fb
+{
+	//! Common structure for things referred to by OpenXR handles.
+	struct oxr_handle_base handle;
+
+	//! Owner of this face tracker.
+	struct oxr_session *sess;
+
+	//! xrt_device backing this face tracker
+	struct xrt_device *xdev;
+
+	//! Type of the body joint set e.g. XR_FB_body_tracking or XR_META_body_tracking_full_body
+	enum xrt_body_joint_set_type_fb joint_set_type;
 };
 
 /*!

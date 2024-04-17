@@ -292,6 +292,62 @@ oxr_system_get_face_tracking_htc_support(struct oxr_logger *log,
 	}
 }
 
+static bool
+oxr_system_get_body_tracking_support(struct oxr_logger *log,
+                                     struct oxr_instance *inst,
+                                     const enum xrt_input_name body_tracking_name)
+{
+	struct oxr_system *sys = &inst->system;
+	const struct xrt_device *body = GET_XDEV_BY_ROLE(sys, body);
+	if (body == NULL || !body->body_tracking_supported || body->inputs == NULL) {
+		return false;
+	}
+
+	for (size_t input_idx = 0; input_idx < body->input_count; ++input_idx) {
+		const struct xrt_input *input = &body->inputs[input_idx];
+		if (input->name == body_tracking_name) {
+			return true;
+		}
+	}
+	return false;
+}
+
+bool
+oxr_system_get_body_tracking_fb_support(struct oxr_logger *log, struct oxr_instance *inst)
+{
+	return oxr_system_get_body_tracking_support(log, inst, XRT_INPUT_FB_BODY_TRACKING);
+}
+
+bool
+oxr_system_get_full_body_tracking_meta_support(struct oxr_logger *log, struct oxr_instance *inst)
+{
+	return oxr_system_get_body_tracking_support(log, inst, XRT_INPUT_META_FULL_BODY_TRACKING);
+}
+
+bool
+oxr_system_get_body_tracking_fidelity_meta_support(struct oxr_logger *log, struct oxr_instance *inst)
+{
+	if (!oxr_system_get_body_tracking_fb_support(log, inst) &&
+	    !oxr_system_get_full_body_tracking_meta_support(log, inst)) {
+		return false;
+	}
+	struct oxr_system *sys = &inst->system;
+	const struct xrt_device *body = GET_XDEV_BY_ROLE(sys, body);
+	return body->body_tracking_fidelity_supported;
+}
+
+bool
+oxr_system_get_body_tracking_calibration_meta_support(struct oxr_logger *log, struct oxr_instance *inst)
+{
+	if (!oxr_system_get_body_tracking_fb_support(log, inst) &&
+	    !oxr_system_get_full_body_tracking_meta_support(log, inst)) {
+		return false;
+	}
+	struct oxr_system *sys = &inst->system;
+	const struct xrt_device *body = GET_XDEV_BY_ROLE(sys, body);
+	return body->body_tracking_calibration_supported;
+}
+
 XrResult
 oxr_system_get_properties(struct oxr_logger *log, struct oxr_system *sys, XrSystemProperties *properties)
 {
@@ -385,6 +441,61 @@ oxr_system_get_properties(struct oxr_logger *log, struct oxr_system *sys, XrSyst
 		htc_facial_tracking_props->supportLipFacialTracking = supports_lip;
 	}
 #endif // OXR_HAVE_HTC_facial_tracking
+
+#ifdef OXR_HAVE_FB_body_tracking
+	XrSystemBodyTrackingPropertiesFB *body_tracking_fb_props = NULL;
+	if (sys->inst->extensions.FB_body_tracking) {
+		body_tracking_fb_props = OXR_GET_OUTPUT_FROM_CHAIN(
+		    properties, XR_TYPE_SYSTEM_BODY_TRACKING_PROPERTIES_FB, XrSystemBodyTrackingPropertiesFB);
+	}
+
+	if (body_tracking_fb_props) {
+		body_tracking_fb_props->supportsBodyTracking = oxr_system_get_body_tracking_fb_support(log, sys->inst);
+	}
+#endif // OXR_HAVE_FB_body_tracking
+
+#ifdef OXR_HAVE_META_body_tracking_full_body
+	XrSystemPropertiesBodyTrackingFullBodyMETA *full_body_tracking_meta_props = NULL;
+	if (sys->inst->extensions.META_body_tracking_full_body) {
+		full_body_tracking_meta_props =
+		    OXR_GET_OUTPUT_FROM_CHAIN(properties, XR_TYPE_SYSTEM_PROPERTIES_BODY_TRACKING_FULL_BODY_META,
+		                              XrSystemPropertiesBodyTrackingFullBodyMETA);
+	}
+
+	if (full_body_tracking_meta_props) {
+		full_body_tracking_meta_props->supportsFullBodyTracking =
+		    oxr_system_get_full_body_tracking_meta_support(log, sys->inst);
+	}
+#endif // OXR_HAVE_META_body_tracking_full_body
+
+#ifdef OXR_HAVE_META_body_tracking_fidelity
+	XrSystemPropertiesBodyTrackingFidelityMETA *body_tracking_fidelity_meta_props = NULL;
+	if (sys->inst->extensions.META_body_tracking_fidelity) {
+		body_tracking_fidelity_meta_props =
+		    OXR_GET_OUTPUT_FROM_CHAIN(properties, XR_TYPE_SYSTEM_PROPERTIES_BODY_TRACKING_FIDELITY_META,
+		                              XrSystemPropertiesBodyTrackingFidelityMETA);
+	}
+
+	if (body_tracking_fidelity_meta_props) {
+		body_tracking_fidelity_meta_props->supportsBodyTrackingFidelity =
+		    oxr_system_get_body_tracking_fidelity_meta_support(log, sys->inst);
+	}
+#endif // OXR_HAVE_META_body_tracking_fidelity
+
+#ifdef OXR_HAVE_META_body_tracking_calibration
+	XrSystemPropertiesBodyTrackingCalibrationMETA *body_tracking_calibration_meta_props = NULL;
+	if (sys->inst->extensions.META_body_tracking_calibration) {
+		body_tracking_calibration_meta_props =
+		    OXR_GET_OUTPUT_FROM_CHAIN(properties, XR_TYPE_SYSTEM_PROPERTIES_BODY_TRACKING_CALIBRATION_META,
+		                              XrSystemPropertiesBodyTrackingCalibrationMETA);
+	}
+
+	if (body_tracking_calibration_meta_props) {
+		body_tracking_calibration_meta_props->supportsHeightOverride =
+		    oxr_system_get_body_tracking_calibration_meta_support(log, sys->inst);
+	}
+#endif // OXR_HAVE_META_body_tracking_calibration
+
 	return XR_SUCCESS;
 }
 

@@ -607,6 +607,52 @@
 #define OXR_EXTENSION_SUPPORT_HTC_facial_tracking(_)
 #endif
 
+
+/*
+ * XR_FB_body_tracking
+ */
+#if defined(XR_FB_body_tracking) && defined(XRT_FEATURE_OPENXR_BODY_TRACKING_FB)
+#define OXR_HAVE_FB_body_tracking
+#define OXR_EXTENSION_SUPPORT_FB_body_tracking(_) _(FB_body_tracking, FB_BODY_TRACKING)
+#else
+#define OXR_EXTENSION_SUPPORT_FB_body_tracking(_)
+#endif
+
+
+/*
+ * XR_META_body_tracking_calibration
+ */
+#if defined(XR_META_body_tracking_calibration) && defined(XRT_FEATURE_OPENXR_BODY_TRACKING_CALIBRATION_META)
+#define OXR_HAVE_META_body_tracking_calibration
+#define OXR_EXTENSION_SUPPORT_META_body_tracking_calibration(_)                                                        \
+	_(META_body_tracking_calibration, META_BODY_TRACKING_CALIBRATION)
+#else
+#define OXR_EXTENSION_SUPPORT_META_body_tracking_calibration(_)
+#endif
+
+
+/*
+ * XR_META_body_tracking_fidelity
+ */
+#if defined(XR_META_body_tracking_fidelity) && defined(XRT_FEATURE_OPENXR_BODY_TRACKING_FIDELITY_META)
+#define OXR_HAVE_META_body_tracking_fidelity
+#define OXR_EXTENSION_SUPPORT_META_body_tracking_fidelity(_) _(META_body_tracking_fidelity, META_BODY_TRACKING_FIDELITY)
+#else
+#define OXR_EXTENSION_SUPPORT_META_body_tracking_fidelity(_)
+#endif
+
+
+/*
+ * XR_META_body_tracking_full_body
+ */
+#if defined(XR_META_body_tracking_full_body) && defined(XRT_FEATURE_OPENXR_BODY_TRACKING_FULL_BODY_META)
+#define OXR_HAVE_META_body_tracking_full_body
+#define OXR_EXTENSION_SUPPORT_META_body_tracking_full_body(_)                                                          \
+	_(META_body_tracking_full_body, META_BODY_TRACKING_FULL_BODY)
+#else
+#define OXR_EXTENSION_SUPPORT_META_body_tracking_full_body(_)
+#endif
+
 // end of GENERATED per-extension defines - do not modify - used by scripts
 
 /*!
@@ -682,5 +728,9 @@
     OXR_EXTENSION_SUPPORT_MNDX_force_feedback_curl(_) \
     OXR_EXTENSION_SUPPORT_MNDX_hydra(_) \
     OXR_EXTENSION_SUPPORT_MNDX_system_buttons(_) \
-    OXR_EXTENSION_SUPPORT_HTC_facial_tracking(_)
+    OXR_EXTENSION_SUPPORT_HTC_facial_tracking(_) \
+    OXR_EXTENSION_SUPPORT_FB_body_tracking(_) \
+    OXR_EXTENSION_SUPPORT_META_body_tracking_calibration(_) \
+    OXR_EXTENSION_SUPPORT_META_body_tracking_fidelity(_) \
+    OXR_EXTENSION_SUPPORT_META_body_tracking_full_body(_)
 // clang-format on
